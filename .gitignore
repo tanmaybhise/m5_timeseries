@@ -1,0 +1,9 @@
+src/data/
+src/main/__pycache__/
+src/tests/__pycache__/
+.vscode/settings.json
+*.pkl
+m5_env/
+src/notebooks/
+src/main/utils/__pycache__/
+src/main/data_preprocessing/__pycache__/
