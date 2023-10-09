@@ -3,28 +3,28 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import logging
-logging.basicConfig(level = logging.DEBUG,
-                    format = '%(asctime)s:%(levelname)s:%(funcName)s:%(name)s:%(message)s')
 import os
 from sklearn import preprocessing
 import pickle
 from main.utils import utils
+from main.utils.logger import logger as logging
+from config import Config
 
 class FeatureEngineering():
     def __init__(self, parameters):
-        self.bronze_data_path = parameters["bronze_data_path"]
+        self.bronze_data_path = Config.bronze_data_path
         self.processed_file_name = parameters["processed_file_name"]
-        self.silver_data_path = parameters["silver_data_path"]
+        self.silver_data_path = Config.silver_data_path
         self.features_data_name = parameters["features_data_name"]
         self.feature_engineering_artifacts_path = parameters["feature_engineering_artifacts_path"]
+        self.mode = parameters["mode"]
 
     def main(self):
         extract_df = self.extract()
         transform_df = self.transform(extract_df)
         self.load(transform_df)
     
-    def extract(self,):
+    def extract(self):
         logging.info(f"Extract process started at {datetime.now()}")
         dataframe = pd.read_parquet(f"{self.bronze_data_path}/{self.processed_file_name}.parquet")
         logging.info(f"Extract process finished at {datetime.now()}")
@@ -44,15 +44,16 @@ class FeatureEngineering():
         boolean_features = ['event_name_1', 'event_type_1','event_name_2', 'event_type_2']
         processed_data = self.convert_string_to_boolean(dataframe, boolean_features)
         
-        categorical_features = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id', 'weekday']
-        self.create_categorical_label_encoders(processed_data, categorical_features)
+        categorical_features = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id', 'weekday']
+        if self.mode == "train":
+            self.create_categorical_label_encoders(processed_data, categorical_features)
         processed_data = self.encode_categories(processed_data, categorical_features, 
                                                 encoder_type="label_encoder")
         
         selected_features = other+snaps+lags+targets
         processed_data = processed_data[selected_features]
         
-        numeric_columns = processed_data.columns[processed_data.columns != "prediction_start_date"]
+        numeric_columns = processed_data.columns[~processed_data.columns.isin(["prediction_start_date", "id"])]
         processed_data.loc[:, numeric_columns]=processed_data[numeric_columns].apply(pd.to_numeric)
         processed_data.loc[:, "prediction_start_date"] = pd.to_datetime(processed_data["prediction_start_date"])
 
@@ -88,10 +89,9 @@ class FeatureEngineering():
     
 if __name__=="__main__":
     feature_engineering_parameters = {
-                            "bronze_data_path": "src/data/bronze",
                             "processed_file_name": "m5_processed",
-                            "silver_data_path": "src/data/silver",
                             "features_data_name": "features",
-                            "feature_engineering_artifacts_path": "src/data/feature_engineering_artifacts"}
+                            "feature_engineering_artifacts_path": "src/data/feature_engineering_artifacts",
+                            "mode": "train"}
     feature_engineering = FeatureEngineering(parameters=feature_engineering_parameters)
     feature_engineering.main()

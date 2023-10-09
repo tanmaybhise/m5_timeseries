@@ -31,6 +31,7 @@ def _create_preprocessing_object():
                                 "horizon": 2,
                                 "lookback_multiple": 2,
                                 "raw_data_path": "src/data/raw",
+                                "raw_data_name": "sales_train_evaluation",
                                 "bronze_data_path": "src/data/bronze",
                                 "processed_file_name": "m5_processed"}
     return Preprocess(preprocessing_parameters)

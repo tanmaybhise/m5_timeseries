@@ -7,3 +7,5 @@ m5_env/
 src/notebooks/
 src/main/utils/__pycache__/
 src/main/data_preprocessing/__pycache__/
+src/main/modeling/__pycache__/
+src/main/modeling/models/__pycache__/

@@ -6,10 +6,10 @@ from datetime import datetime, timedelta
 from collections import namedtuple
 import numpy as np
 import pandas as pd
-import logging
-logging.basicConfig(level = logging.DEBUG,
-                    format = '%(asctime)s:%(levelname)s:%(funcName)s:%(name)s:%(message)s')
+
 from main.utils import utils
+from main.utils.logger import logger as logging
+from config import Config
 
 class Preprocess():
     def __init__(self, parameters):
@@ -22,9 +22,11 @@ class Preprocess():
         self.state_id = parameters["state_id"].split(",")
         self.horizon = parameters["horizon"]
         self.lookback_multiple = parameters["lookback_multiple"]
-        self.raw_data_path = parameters["raw_data_path"]
-        self.bronze_data_path = parameters["bronze_data_path"]
+        self.raw_data_path = Config.raw_data_path
+        self.bronze_data_path = Config.bronze_data_path
+        self.raw_data_name = parameters["raw_data_name"]
         self.processed_file_name = parameters["processed_file_name"] 
+        self.mode = parameters["mode"] 
 
     def main(self):
         extract_df = self.extract()
@@ -46,7 +48,7 @@ class Preprocess():
                 zip_ref.extractall(self.raw_data_path)
             os.remove("src/data/raw/m5-forecasting-accuracy.zip")
 
-        dataframe = pd.read_csv(self.raw_data_path+"/sales_train_evaluation.csv")
+        dataframe = pd.read_csv(self.raw_data_path+f"/{self.raw_data_name}.csv")
 
         logging.info(f"Extract process finished at {datetime.now()}")
         return dataframe
@@ -60,7 +62,8 @@ class Preprocess():
         """
         logging.info(f"Transform process started at {datetime.now()}")
         static_columns = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
-        day_codes = np.array([f"d_{n}" for n in range(1,1942)])
+        max_day = max([int(day.split("_")[-1]) for day in dataframe.columns[dataframe.columns.str.contains("d_")]])
+        day_codes = np.array([f"d_{n}" for n in range(1,max_day+1)])
         dataframe = dataframe[dataframe["state_id"].isin(self.state_id)]
         preprocessed_data = self.create_lags_and_target_columns(dataframe, static_columns, day_codes)
         calender_data = pd.read_csv(self.raw_data_path+"/calendar.csv")
@@ -113,8 +116,7 @@ class Preprocess():
         f = np.vectorize(_get_date_from_day_code)
         return f(day_codes, reference_date, direction)
 
-    @staticmethod
-    def split_lags_and_targets(day_codes, horizon, lookback_multiple):
+    def split_lags_and_targets(self, day_codes, horizon, lookback_multiple):
         """
          Split lags and targets. This is a helper function for : func : ` get_lags_and_targets `.
          
@@ -128,21 +130,26 @@ class Preprocess():
         """
         lags_and_targets_tuple = namedtuple("lags_and_targets_tuple", "lags targets")
         lags_and_targets = []
-        lag_start_index = 0.1 #random small number
-        n=0
-        # Find the lag_start_index of the first lag in the day_codes.
-        while abs(lag_start_index) < len(day_codes):
-            target_start_index = -horizon*(n+1)
-            target_end_index = [None if n==0 else -horizon*(n)][0]
-            lag_start_index = -horizon*(n+1) - horizon*lookback_multiple
-            # If lag_start_index is less than the number of day codes in the day codes list.
-            if abs(lag_start_index) > len(day_codes):
-                break
-            lag_end_index = -horizon*(n+1)
-            targets = day_codes[target_start_index:target_end_index]
-            lags = day_codes[lag_start_index:lag_end_index]
-            lags_and_targets.append(lags_and_targets_tuple(lags, targets))
-            n+=1
+        if self.mode == "train":
+            lag_start_index = 0.1 #random small number
+            n=0
+            # Find the lag_start_index of the first lag in the day_codes.
+            while abs(lag_start_index) < len(day_codes):
+                target_start_index = -horizon*(n+1)
+                target_end_index = [None if n==0 else -horizon*(n)][0]
+                lag_start_index = -horizon*(n+1) - horizon*lookback_multiple
+                # If lag_start_index is less than the number of day codes in the day codes list.
+                if abs(lag_start_index) > len(day_codes):
+                    break
+                lag_end_index = -horizon*(n+1)
+                targets = day_codes[target_start_index:target_end_index]
+                lags = day_codes[lag_start_index:lag_end_index]
+                lags_and_targets.append(lags_and_targets_tuple(lags, targets))
+                n+=1
+        elif self.mode == "infer":
+            lags = day_codes[-horizon*lookback_multiple:]
+            lags_and_targets.append(lags_and_targets_tuple(lags, np.array([])))
+        
         return lags_and_targets
 
     def create_lags_and_target_columns(self, dataframe, static_columns, day_codes):
@@ -166,7 +173,12 @@ class Preprocess():
 
             selected_columns = static_columns+lags+targets
             tmp_df = dataframe[selected_columns]
-            tmp_df.loc[:, ["prediction_start_date"]] = self.get_dates_from_day_codes(targets[0])
+            if self.mode == "infer":
+                max_day = max([int(day.split("_")[-1]) for day in lags])
+                prediction_start_date = "d_"+str(max_day+1)
+            else:
+                prediction_start_date = targets[0]
+            tmp_df.loc[:, ["prediction_start_date"]] = self.get_dates_from_day_codes(prediction_start_date)
             tmp_df.loc[:, ["prediction_start_date"]] = pd.to_datetime(tmp_df["prediction_start_date"]).dt.date
 
             column_mappings = dict()
@@ -197,8 +209,8 @@ if __name__ == "__main__":
     preprocessing_parameters = {"state_id":"WI",
                                 "horizon": 28,
                                 "lookback_multiple": 2,
-                                "raw_data_path": "src/data/raw",
-                                "bronze_data_path": "src/data/bronze",
-                                "processed_file_name": "m5_processed"}
+                                "raw_data_name": "sales_train_evaluation",
+                                "processed_file_name": "m5_processed",
+                                "mode": "train"}
     preprocessor = Preprocess(preprocessing_parameters)
     preprocessor.main()
