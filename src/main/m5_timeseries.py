@@ -19,7 +19,7 @@ if len(sys.argv) > 1:
         model.train()
     elif sys.argv[1]=="infer":
         logging.info("Executing script for inference")
-        for dataset in Config.datasets:
+        for dataset in Config.inference_datasets:
 
             preprocessing_parameters["raw_data_name"] = dataset[1]
             model_parameters["prediction_data_suffix"] = dataset[0]

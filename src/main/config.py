@@ -15,7 +15,7 @@ class Config:
     models_dict = {"lgb": LGBModel(),
                    "linear": LinearRegression()}
     
-    datasets = [
+    inference_datasets = [
                 ("evaluation", "sales_train_evaluation"),
                 ("validation", "sales_train_validation")
                ]
