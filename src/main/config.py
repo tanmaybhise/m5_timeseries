@@ -8,6 +8,10 @@ class Config:
     gold_data_path = "src/data/gold"
     trained_models_path = "src/data/trained_models"
 
+    state_id = "WI"
+    horizon = 28
+    lookback_multiple = 2
+
     models_dict = {"lgb": LGBModel(),
                    "linear": LinearRegression()}
     
@@ -24,9 +28,7 @@ class Config:
         elif mode == "infer":
             raw_data = "sales_train_validation"
 
-        preprocessing_parameters = {"state_id":"CA,TX,WI",
-                                    "horizon": 28,
-                                    "lookback_multiple": 2,
+        preprocessing_parameters = {
                                     "raw_data_name": raw_data,
                                     "processed_file_name": f"m5_processed_{mode}",
                                     "mode": mode}

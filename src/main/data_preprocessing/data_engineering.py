@@ -19,9 +19,9 @@ class Preprocess():
          Args:
          	 parameters: Dictionary containing the parameters
         """
-        self.state_id = parameters["state_id"].split(",")
-        self.horizon = parameters["horizon"]
-        self.lookback_multiple = parameters["lookback_multiple"]
+        self.state_id = Config.state_id.split(",")
+        self.horizon = Config.horizon
+        self.lookback_multiple = Config.lookback_multiple
         self.raw_data_path = Config.raw_data_path
         self.bronze_data_path = Config.bronze_data_path
         self.raw_data_name = parameters["raw_data_name"]

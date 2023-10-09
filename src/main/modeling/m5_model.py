@@ -8,6 +8,7 @@ from datetime import datetime
 import pandas as pd
 import pickle
 import os
+from sklearn import metrics
 
 class M5model():
     def __init__(self, parameters) -> None:
@@ -39,9 +40,19 @@ class M5model():
         features = train_df.columns[~((train_df.columns.str.contains("target")) \
                                       | (train_df.columns.isin(["prediction_start_date", "id"])))]
         pd.Series(features, name="features").to_csv(f"{self.trained_models_path}/features.csv", index=None)
+
         for model in self.models:
             logging.info(f"Training {model} started at {datetime.now()}")
             trained_model = Config.models_dict[model].fit(train_df[features], train_df[targets])
+            yhat = trained_model.predict(test_df[features])
+            metrics_dict = {
+                "model": model,
+                "mae": metrics.mean_absolute_error(test_df[targets], yhat),
+                "mape": metrics.mean_absolute_percentage_error(test_df[targets], yhat),
+                "mse": metrics.mean_squared_error(test_df[targets], yhat),
+                "rmse": metrics.mean_squared_error(test_df[targets], yhat, squared=False)
+            }
+            self.__create_metrics_df(metrics_dict)
             pickle.dump(trained_model, open(f"{self.trained_models_path}/{model}_model.pkl", "wb"))
             logging.info(f"Training {model} finished at {datetime.now()}")
         
@@ -71,6 +82,24 @@ class M5model():
             os.remove(f"{self.gold_data_path}/{model}_predictions_validation.csv")
             os.remove(f"{self.gold_data_path}/{model}_predictions_evaluation.csv")
         logging.info(f"Creating submission finished at {datetime.now()}")
+
+    def __create_metrics_df(self, metrics_dict):
+        if os.path.isfile(f"{self.gold_data_path}/metrics.csv"):
+            metric_df = pd.read_csv(f"{self.gold_data_path}/metrics.csv")
+            running_index = metric_df.index[-1]+1
+        else:
+            metric_df = pd.DataFrame()
+            running_index=0
+        tmp_metric_df = pd.DataFrame()
+        tmp_metric_df.loc[running_index, "datetime"] = datetime.now()
+        tmp_metric_df.loc[running_index, "horizon"] = Config.horizon
+        tmp_metric_df.loc[running_index, "lookback_multiple"] = Config.lookback_multiple
+        for metric, value in metrics_dict.items():
+            tmp_metric_df.loc[running_index, metric] = value
+
+        metric_df = pd.concat([metric_df, tmp_metric_df], axis=0).reset_index(drop=True)
+        metric_df.to_csv(f"{self.gold_data_path}/metrics.csv", index=None)
+        
 
             
     @staticmethod
