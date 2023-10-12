@@ -1,5 +1,7 @@
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+import sys
+sys.path.append("src")
 import zipfile
 import os
 from datetime import datetime, timedelta
@@ -9,7 +11,8 @@ import pandas as pd
 
 from main.utils import utils
 from main.utils.logger import logger as logging
-from config import Config
+from main.config import Config
+from tqdm import tqdm
 
 class Preprocess():
     def __init__(self, parameters):
@@ -61,11 +64,28 @@ class Preprocess():
          	 a list of data
         """
         logging.info(f"Transform process started at {datetime.now()}")
-        static_columns = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
-        max_day = max([int(day.split("_")[-1]) for day in dataframe.columns[dataframe.columns.str.contains("d_")]])
-        day_codes = np.array([f"d_{n}" for n in range(1,max_day+1)])
         dataframe = dataframe[dataframe["state_id"].isin(self.state_id)]
-        preprocessed_data = self.create_lags_and_target_columns(dataframe, static_columns, day_codes)
+        static_columns = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
+        if self.mode == "train":
+            drop_days = np.array([f"d_{n}" for n in range(1, Config.processing_start_day)])
+            dataframe = dataframe.drop(drop_days, axis=1).reset_index(drop=True)
+        elif self.mode == "infer":
+            day_codes = dataframe.columns[dataframe.columns.str.contains("d_")]
+            max_day = max([int(day_code.split("_")[-1]) for day_code in day_codes])
+            drop_days = [f"d_{i}" for i in range(1, max_day - (self.horizon*self.lookback_multiple - 1))]
+            dataframe = dataframe.drop(drop_days, axis=1).reset_index(drop=True)
+            pred_columns = [f"d_{n}" for n in range(max_day+1, max_day+self.horizon+1)]
+            dataframe.loc[:, pred_columns] = -9999
+        else:
+            raise NotImplementedError(f"Filtering for mode {self.mode} is not implemented")
+        dataframe = dataframe.melt(id_vars=static_columns, 
+                                   value_name="demand", var_name="d")
+        preprocessed_data = self.add_leads_and_lags_features(dataframe, 
+                                                column_name="demand", 
+                                                group_by=["d"],
+                                                lags=np.arange(1, 
+                                                    Config.horizon*Config.lookback_multiple+1),
+                                                leads=np.arange(1, Config.horizon))
         calender_data = pd.read_csv(self.raw_data_path+"/calendar.csv")
         preprocessed_data = self.add_calender_features(preprocessed_data, calender_data)
         logging.info(f"Transform process finished at {datetime.now()}")
@@ -77,6 +97,35 @@ class Preprocess():
         data.to_parquet(f"{self.bronze_data_path}/{self.processed_file_name}.parquet")
         logging.info(f"Processed data stored at {self.bronze_data_path}/{self.processed_file_name}.parquet")
         logging.info(f"Load process finished at {datetime.now()}")
+
+    @staticmethod
+    def add_leads_and_lags_features(dataframe, 
+                                    column_name="demand", 
+                                    group_by=["day"],
+                                    lags=np.arange(1, 
+                                            Config.horizon*Config.lookback_multiple+1),
+                                    leads=np.arange(1, Config.horizon)):
+        
+        def _add_shift_features(dataframe, column_name, 
+                                group_by, shifts):
+            for shift in shifts:
+                if shift !=0:
+                    if shift > 0:
+                        new_column_name=f"{column_name}_lag_{shift}"
+                    elif shift < 0:
+                        new_column_name=f"target_{abs(shift)+1}"
+                    dataframe.loc[:, new_column_name] = \
+                                    dataframe.groupby(group_by)[column_name]\
+                                    .transform(lambda df: df.shift(shift))
+            return dataframe
+        
+        dataframe = _add_shift_features(dataframe, column_name=column_name, 
+                                             group_by=group_by, shifts=np.array(lags))
+        dataframe = _add_shift_features(dataframe, column_name=column_name, 
+                                             group_by=group_by, shifts=-1*(np.array(leads)-1))
+        dataframe = dataframe.rename(columns = {column_name: "target_1"})
+        dataframe = dataframe.dropna(axis=0).reset_index(drop=True)
+        return dataframe
 
     @staticmethod
     def get_dates_from_day_codes(day_codes, reference_date=datetime(2011,1,29), direction="lead"):
@@ -116,89 +165,11 @@ class Preprocess():
         f = np.vectorize(_get_date_from_day_code)
         return f(day_codes, reference_date, direction)
 
-    def split_lags_and_targets(self, day_codes, horizon, lookback_multiple):
-        """
-         Split lags and targets. This is a helper function for : func : ` get_lags_and_targets `.
-         
-         Args:
-         	 day_codes: A list of day codes. Each entry is a numpy array of length ` ` len ( day_codes ) ` `.
-         	 horizon: The number of days between lag and target.
-         	 lookback_multiple: The number of lookbacks to be used for splitting.
-         
-         Returns: 
-         	 A list of ` ` ( lags, targets ) ` ` tuples where ` ` lags ` ` is a numpy array of length ` ` len ( day_codes ) ` `
-        """
-        lags_and_targets_tuple = namedtuple("lags_and_targets_tuple", "lags targets")
-        lags_and_targets = []
-        if self.mode == "train":
-            lag_start_index = 0.1 #random small number
-            n=0
-            # Find the lag_start_index of the first lag in the day_codes.
-            while abs(lag_start_index) < len(day_codes):
-                target_start_index = -horizon*(n+1)
-                target_end_index = [None if n==0 else -horizon*(n)][0]
-                lag_start_index = -horizon*(n+1) - horizon*lookback_multiple
-                # If lag_start_index is less than the number of day codes in the day codes list.
-                if abs(lag_start_index) > len(day_codes):
-                    break
-                lag_end_index = -horizon*(n+1)
-                targets = day_codes[target_start_index:target_end_index]
-                lags = day_codes[lag_start_index:lag_end_index]
-                lags_and_targets.append(lags_and_targets_tuple(lags, targets))
-                n+=1
-        elif self.mode == "infer":
-            lags = day_codes[-horizon*lookback_multiple:]
-            lags_and_targets.append(lags_and_targets_tuple(lags, np.array([])))
-        
-        return lags_and_targets
-
-    def create_lags_and_target_columns(self, dataframe, static_columns, day_codes):
-        """
-         Create lags and targets columns based on day codes. This is a helper function for : meth : ` create_all_lags_and_targets `
-         
-         Args:
-         	 dataframe: Dataframe to be processed.
-         	 static_columns: List of columns to be used for static prediction.
-         	 day_codes: List of day codes to be used for splitting.
-         
-         Returns: 
-         	 Processed dataframe
-        """
-        processed_df = pd.DataFrame()
-        lags_and_targets = self.split_lags_and_targets(day_codes, horizon=self.horizon, lookback_multiple=self.lookback_multiple)
-        # Returns a dataframe with the data for each batch of lags and targets.
-        for batch in lags_and_targets:
-            lags = batch.lags.tolist()
-            targets = batch.targets.tolist()
-
-            selected_columns = static_columns+lags+targets
-            tmp_df = dataframe[selected_columns]
-            if self.mode == "infer":
-                max_day = max([int(day.split("_")[-1]) for day in lags])
-                prediction_start_date = "d_"+str(max_day+1)
-            else:
-                prediction_start_date = targets[0]
-            tmp_df.loc[:, ["prediction_start_date"]] = self.get_dates_from_day_codes(prediction_start_date)
-            tmp_df.loc[:, ["prediction_start_date"]] = pd.to_datetime(tmp_df["prediction_start_date"]).dt.date
-
-            column_mappings = dict()
-            lags_mapping = {lag_column:f"lag_{n+1}" for lag_column,n in zip(lags, reversed(range(len(lags))))}
-            column_mappings.update(lags_mapping)
-            targets_mapping = {target_column:f"target_{n+1}" for target_column,n in zip(targets, range(len(targets)))}
-            column_mappings.update(targets_mapping)
-
-            tmp_df = tmp_df.rename(columns = column_mappings)
-            processed_df = pd.concat([processed_df, tmp_df], axis=0)
-        
-        processed_df["prediction_start_date"] = pd.to_datetime(processed_df["prediction_start_date"])
-
-        return processed_df
-
     @staticmethod
     def add_calender_features(dataframe, calender_data):
         assert "date" in calender_data.columns
         calender_data["prediction_start_date"] = pd.to_datetime(calender_data["date"])
-        dataframe = pd.merge(dataframe, calender_data, on="prediction_start_date")
+        dataframe = pd.merge(dataframe, calender_data, on="d")
         assert (dataframe["prediction_start_date"] == dataframe["date"]).all()
         return dataframe
 
@@ -206,11 +177,8 @@ class Preprocess():
 
 # This function is called from the main class.
 if __name__ == "__main__":
-    preprocessing_parameters = {"state_id":"WI",
-                                "horizon": 28,
-                                "lookback_multiple": 2,
-                                "raw_data_name": "sales_train_evaluation",
-                                "processed_file_name": "m5_processed",
-                                "mode": "train"}
+    preprocessing_parameters = {"raw_data_name": "sales_train_evaluation",
+                                "processed_file_name": f"m5_processed_infer",
+                                "mode": "infer"}
     preprocessor = Preprocess(preprocessing_parameters)
     preprocessor.main()

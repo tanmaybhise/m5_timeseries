@@ -1,5 +1,7 @@
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+import sys
+sys.path.append("src")
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -8,7 +10,8 @@ from sklearn import preprocessing
 import pickle
 from main.utils import utils
 from main.utils.logger import logger as logging
-from config import Config
+from main.config import Config
+from tqdm import tqdm
 
 class FeatureEngineering():
     def __init__(self, parameters):
@@ -35,22 +38,22 @@ class FeatureEngineering():
 
         targets = [col for col in dataframe.columns if (col.find("target")!=-1)]
         lags = [col for col in dataframe.columns if (col.find("lag")!=-1)]
-        other = ['id', 'item_id', 'dept_id', 'cat_id', 'store_id',
-                'state_id', 'prediction_start_date', 'wm_yr_wk', 
-                'weekday', 'wday', 'month', 'year', 'event_name_1', 
-                'event_type_1', 'event_name_2', 'event_type_2']
+        other = ['id', 'prediction_start_date', 'wm_yr_wk', 
+                'wday', 'month', 'year']
         snaps = [f"snap_{state}" for state in dataframe["state_id"].unique()]
+        categorical_features = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id', 'weekday']
+        stats_encoded_features = []
+        for cat in categorical_features:
+            stats_encoded_features+=[f"{cat}_mean_demand", f"{cat}_max_demand", f"{cat}_std_demand"]
+        boolean_features = ['event_name_1','event_name_2']
 
-        boolean_features = ['event_name_1', 'event_type_1','event_name_2', 'event_type_2']
+        dataframe["generated_id"] = dataframe["item_id"]+"_"+dataframe["store_id"]
         processed_data = self.convert_string_to_boolean(dataframe, boolean_features)
         
-        categorical_features = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id', 'weekday']
-        if self.mode == "train":
-            self.create_categorical_label_encoders(processed_data, categorical_features)
-        processed_data = self.encode_categories(processed_data, categorical_features, 
-                                                encoder_type="label_encoder")
-        
-        selected_features = other+snaps+lags+targets
+        processed_data = utils.create_stats_encoding(data=processed_data, 
+                                                     features=categorical_features, 
+                                                     mode=self.mode)
+        selected_features = other+boolean_features+stats_encoded_features+snaps+lags+targets
         processed_data = processed_data[selected_features]
         
         numeric_columns = processed_data.columns[~processed_data.columns.isin(["prediction_start_date", "id"])]

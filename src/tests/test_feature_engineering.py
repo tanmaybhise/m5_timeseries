@@ -18,10 +18,9 @@ def test_convert_string_to_boolean():
 
 def _get_feature_engineering_object():
     feature_engineering_parameters = {
-                            "bronze_data_path": "src/data/bronze",
-                            "processed_file_name": "m5_processed",
-                            "silver_data_path": "src/data/silver",
-                            "features_data_name": "features",
-                            "feature_engineering_artifacts_path": "src/data/feature_engineering_artifacts"}
+                                "feature_engineering_artifacts_path": "src/data/feature_engineering_artifacts",
+                                "processed_file_name": "m5_processed_train",
+                                "features_data_name": "features_train",
+                                "mode": "train"}
     fe = FeatureEngineering(parameters=feature_engineering_parameters)
     return fe

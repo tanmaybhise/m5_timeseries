@@ -4,6 +4,7 @@ from datetime import datetime
 from main.data_preprocessing.data_engineering import Preprocess
 
 import numpy as np
+import pandas as pd
 
 
 def test_get_dates_from_day_codes():
@@ -13,27 +14,31 @@ def test_get_dates_from_day_codes():
                                             direction="lead")
     assert all(dates == np.array([datetime(2011, 1, 29, 0, 0), datetime(2011, 1, 31, 0, 0)]))
 
-def test_split_lags_and_targets():
-    preprocessor = _create_preprocessing_object()
-    day_codes = [f"{n+1}" for n in range(10)]
-    lags_and_targets = preprocessor.split_lags_and_targets(day_codes, horizon=preprocessor.horizon, 
-                                                           lookback_multiple=preprocessor.lookback_multiple)
 
-    assert lags_and_targets[0].lags == ['5', '6', '7', '8'] and \
-    lags_and_targets[0].targets == ['9', '10']
-    assert lags_and_targets[1].lags == ['3', '4', '5', '6'] and \
-        lags_and_targets[1].targets == ['7', '8']
-    assert lags_and_targets[2].lags == ['1', '2', '3', '4'] and \
-        lags_and_targets[2].targets == ['5', '6']
+def test_add_leads_and_lags_features():
+    preprocessor = _create_preprocessing_object()
+    sample_data = pd.DataFrame({"cat": ["cat1"]*5 + ["cat2"]*5,
+                           "values": np.arange(1,11)})
+    results = preprocessor.add_leads_and_lags_features(sample_data, 
+                                                    column_name="values", 
+                                                    group_by=["cat"], lags=[1, 2], 
+                                                    leads=[2])
+
+    assert np.isin(["values_lag_1", "values_lag_2", "target_2"], results.columns).all()
+    assert ((results["values_lag_1"].values == \
+            np.array([np.nan,  1.,  2.,  3.,  4., np.nan,  6.,  7.,  8.,  9.])) \
+                                                | (np.isnan(results["values_lag_1"]))).all()
+    assert ((results["values_lag_2"].values == \
+            np.array([np.nan, np.nan,  1.,  2.,  3., np.nan, np.nan,  6.,  7.,  8.])) \
+                                                | (np.isnan(results["values_lag_2"]))).all()
+    assert ((results["target_2"].values == \
+            np.array([ 2.,  3.,  4.,  5., np.nan,  7.,  8.,  9., 10., np.nan])) \
+                                                | (np.isnan(results["target_2"]))).all()
 
 def _create_preprocessing_object():
-    preprocessing_parameters = {"state_id":"WI",
-                                "horizon": 2,
-                                "lookback_multiple": 2,
-                                "raw_data_path": "src/data/raw",
-                                "raw_data_name": "sales_train_evaluation",
-                                "bronze_data_path": "src/data/bronze",
-                                "processed_file_name": "m5_processed"}
-    return Preprocess(preprocessing_parameters)
+    preprocessing_parameters = {"raw_data_name": "sales_train_evaluation",
+                                "processed_file_name": f"m5_processed_train",
+                                "mode": "train"}
+    return Preprocess(parameters=preprocessing_parameters)
 
 

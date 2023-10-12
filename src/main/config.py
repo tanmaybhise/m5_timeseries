@@ -1,4 +1,4 @@
-from modeling.models.lightgbm_model import LGBModel
+from main.modeling.models.lightgbm_model import LGBModel
 from sklearn.linear_model import LinearRegression
 
 class Config:
@@ -8,9 +8,11 @@ class Config:
     gold_data_path = "src/data/gold"
     trained_models_path = "src/data/trained_models"
 
-    state_id = "WI"
-    horizon = 28
-    lookback_multiple = 2
+    processing_start_day = 1000
+    state_id = "CA,TX,WI"
+    horizon = 1
+    lookback_multiple = 0
+    inference_horizon = 28
 
     models_dict = {"lgb": LGBModel(),
                    "linear": LinearRegression()}
@@ -19,7 +21,7 @@ class Config:
                 ("evaluation", "sales_train_evaluation"),
                 ("validation", "sales_train_validation")
                ]
-
+    
     @classmethod
     def get_config(cls, mode):
 

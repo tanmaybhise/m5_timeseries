@@ -22,6 +22,7 @@ if len(sys.argv) > 1:
         for dataset in Config.inference_datasets:
 
             preprocessing_parameters["raw_data_name"] = dataset[1]
+            model_parameters["raw_data_name"] = dataset[1]
             model_parameters["prediction_data_suffix"] = dataset[0]
 
             preprocessor = Preprocess(parameters=preprocessing_parameters)
